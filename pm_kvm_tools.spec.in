@@ -1,0 +1,100 @@
+########################################
+# Derived definitions
+########################################
+%define __check_files %{nil}
+%define name pm_kvm_tools
+%define version @VERSION@
+%define release 1.el6
+%define prefix /usr
+%define ORGARCH pm_kvm_tools-%{version}
+#
+#
+Summary: Applications of pacemaker for the KVM virtual environment.
+Name: %{name}
+Version: %{version}
+Release: %{release}
+Group: Applications
+Source: %{ORGARCH}.tar.gz
+License: GPL/LGPL
+Vendor: NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+BuildRoot: %{_tmppath}/%{name}-%{version}
+BuildRequires:  autoconf, automake libtool pacemaker-libs-devel
+Requires: pacemaker >= 1.0.9
+
+########################################
+%description
+########################################
+This package contains the following applications of pacemaker for the KVM virtual environment.
+ vm-manager : Status monitor for virtual environment.
+ vm-stonith : STONITH function for virtual environment.
+
+########################################
+%prep
+########################################
+rm -rf $RPM_BUILD_ROOT
+%setup -q -n %{ORGARCH}
+pushd $RPM_BUILD_DIR/%{ORGARCH}
+./autogen.sh
+./configure
+popd
+
+########################################
+%build
+########################################
+pushd $RPM_BUILD_DIR/%{ORGARCH}
+make DESTDIR=$RPM_BUILD_ROOT
+popd
+
+########################################
+%install
+########################################
+pushd $RPM_BUILD_DIR/%{ORGARCH}
+make DESTDIR=$RPM_BUILD_ROOT install
+popd
+
+########################################
+%clean
+########################################
+if
+	[ -n "${RPM_BUILD_ROOT}" -a "${RPM_BUILD_ROOT}" != "/" ]
+then
+	rm -rf $RPM_BUILD_ROOT
+fi
+rm -rf $RPM_BUILD_DIR/%{ORGARCH}
+
+########################################
+%pre
+########################################
+true
+
+########################################
+%post
+########################################
+true
+
+########################################
+%preun
+########################################
+true
+
+########################################
+%postun
+########################################
+true
+
+########################################
+%files
+########################################
+%defattr(-,root,root)
+%{_libdir}/libvmconnect.so*
+%{_sbindir}/vm-connectd
+%{_sbindir}/vm-connect
+%{_sbindir}/vm-managerd
+%{_sbindir}/vm-stonithd
+@stonith_ext_plugindir@/vm-stonith
+%dir @OCF_RA_DIR@/extra
+@OCF_RA_DIR@/extra/VirtualDomain
+@OCF_RA_DIR@/extra/vm-anything
+@OCF_RA_DIR@/extra/vm-client
+%config %{_sysconfdir}/vm-manager.conf
+%config %{_sysconfdir}/init/vm-connectd.conf.sample

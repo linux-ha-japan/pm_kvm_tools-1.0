@@ -1,0 +1,253 @@
+#!/bin/sh
+#
+#
+#	vm-client OCF RA. refer for arbitrary attribute information for
+#	vm-managerd.
+#
+# Copyright (c) 2010 NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of version 2 of the GNU General Public License as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it would be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Further, this software is distributed without any warranty that it is
+# free of the rightful claim of any third person regarding infringement
+# or the like.  Any license provided herein, whether implied or
+# otherwise, applies only to this software file.  Patent licenses, if
+# any, provided herein do not apply to combinations of this program with
+# other software, or any other product whatsoever.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write the Free Software Foundation,
+# Inc., 59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+#
+
+#######################################################################
+# Initialization:
+
+. ${OCF_ROOT}/resource.d/heartbeat/.ocf-shellfuncs
+
+#######################################################################
+
+meta_data() {
+	cat <<END
+<?xml version="1.0"?>
+<!DOCTYPE resource-agent SYSTEM "ra-api-1.dtd">
+<resource-agent name="vm-client" version="1.0">
+<version>1.0</version>
+
+<longdesc lang="en">
+This Resource Agent is vm-managerd and a thing to communicate in virtual environment.
+</longdesc>
+<shortdesc lang="en">vm-client resource agent</shortdesc>
+
+<parameters>
+
+<parameter name="attribute_list" unique="1" require="1">
+<longdesc lang="en">
+The list of the attribute to refer to host.
+</longdesc>
+<shortdesc lang="en">attribute list</shortdesc>
+<content type="string" default="" />
+</parameter>
+
+<parameter name="state" unique="1">
+<longdesc lang="en">
+Location to store the resource state in.
+</longdesc>
+<shortdesc lang="en">State file</shortdesc>
+<content type="string" default="${HA_VARRUN}/vm-client-${OCF_RESOURCE_INSTANCE}.state" />
+</parameter>
+
+<parameter name="debug" unique="0">
+<longdesc lang="en">
+Enables to use default ${ATTRD_UPDATER} and ${CONNECT_CMD} verbose logging on every call.
+</longdesc>
+<shortdesc lang="en">Verbose logging</shortdesc>
+<content type="string" default="false"/>
+</parameter>
+
+</parameters>
+
+<actions>
+<action name="start"        timeout="90" />
+<action name="stop"         timeout="100" />
+<action name="monitor"      timeout="20" interval="10" depth="0" start-delay="0" />
+<action name="reload"       timeout="90" />
+<action name="meta-data"    timeout="5" />
+<action name="validate-all"   timeout="30" />
+</actions>
+</resource-agent>
+END
+}
+
+#######################################################################
+
+vmclient_usage() {
+	cat <<END
+usage: $0 {start|stop|monitor|validate-all|meta-data}
+
+Expects to have a fully populated OCF RA-compliant environment set.
+END
+}
+
+attrd_send_update() {
+	echo ${1} | grep "=" 2>&1 >/dev/null
+	if [ $? -ne 0 ]; then
+		return 0
+	fi
+
+	attr_name=`echo ${1} | sed 's/=.*//g'`
+	attr_value=`echo ${1} | sed 's/.*=//g'`
+
+	if [ ${attr_value}x = "x" ]; then
+		${ATTRD_UPDATER} -D -n ${attr_name} ${logging_options}
+		return 0
+	fi
+
+	${ATTRD_UPDATER} -n ${attr_name} -U ${attr_value} ${logging_options}
+	if [ $? -ne 0 ]; then
+		ocf_log err "attrd failed to update. (attr_name=$attr_name)"
+		exit $OCF_ERR_GENERIC
+	fi
+}
+
+communicate_vm_manager() {
+	while true; do
+		sleep 1
+		reqid=`uuidgen`
+		status_list=`${CONNECT_CMD} -t "monitor" -r "${attr_list}" -i ${reqid} ${logging_options}`
+		rc=$?
+		if [ $rc -eq $OCF_SUCCESS ]; then
+			IFS=","
+			for state in ${status_list}; do
+				attrd_send_update "${state}"
+			done
+
+			break
+		elif [ $rc -eq 2 ]; then
+			# is live_migration
+			ocf_log info "Probably perform an inquiry again because migration was performed."
+			continue
+		fi
+
+		return $OCF_ERR_GENERIC
+	done
+
+	return $OCF_SUCCESS
+}
+
+vmclient_start() {
+	vmclient_monitor
+	if [ $? -eq $OCF_SUCCESS ]; then
+		return $OCF_SUCCESS
+	fi
+
+	touch ${OCF_RESKEY_state}
+	vmclient_monitor
+}
+
+vmclient_stop() {
+
+	rm -f ${OCF_RESKEY_state}
+
+	for attr_name in ${attr_list}; do
+		${ATTRD_UPDATER} -D -n ${attr_name} ${logging_options}
+		if [ $? -ne 0 ]; then
+			ocf_log err "attrd failed to delete. (attr_name=$attr_name)"
+			return $OCF_ERR_GENERIC
+		fi
+	done
+
+	return $OCF_SUCCESS
+}
+
+vmclient_monitor() {
+	if [ -f ${OCF_RESKEY_state} ]; then
+		communicate_vm_manager
+		if [ $? -ne $OCF_SUCCESS ]; then
+			ocf_log err "failed in the reception from vm-managerd."
+			return $OCF_ERR_GENERIC
+		fi
+
+		return $OCF_SUCCESS
+	fi
+
+	return $OCF_NOT_RUNNING
+}
+
+vmclient_validate() {
+	# Is the state directory writable?
+	state_dir=`dirname "$OCF_RESKEY_state"`
+	touch "$state_dir/$$"
+	if [ $? != 0 ]; then
+		ocf_log err "Invalid location for 'state': $state_dir is not writable"
+		return $OCF_ERR_ARGS
+	fi
+	rm "$state_dir/$$"
+
+	# Pidfile better be an absolute path
+	case $OCF_RESKEY_state in
+		/*) ;;
+		*) ocf_log warn "You should use an absolute path for state file not: $OCF_RESKEY_state" ;;
+	esac
+
+	# Check the attribute list
+	if [ "x" = "x$attr_list" ]; then
+		ocf_log err "Empty attribute_list."
+		exit $OCF_ERR_CONFIGURED
+	fi
+
+	check_binary ${CONNECT_CMD}
+	check_binary ${ATTRD_UPDATER}
+
+	return $OCF_SUCCESS
+}
+
+: ${OCF_RESKEY_CRM_meta_interval=0}
+: ${OCF_RESKEY_CRM_meta_globally_unique:="true"}
+: ${OCF_RESKEY_debug:="false"}
+
+attr_list=`echo ${OCF_RESKEY_attribute_list} | tr -s " "`
+
+if [ "x$OCF_RESKEY_state" = "x" ]; then
+	if [ ${OCF_RESKEY_CRM_meta_globally_unique} = "false" ]; then
+		state="${HA_VARRUN}/vm-client-${OCF_RESOURCE_INSTANCE}.state"
+	
+		# Strip off the trailing clone marker
+		OCF_RESKEY_state=`echo $state | sed s/:[0-9][0-9]*\.state/.state/`
+	else
+		OCF_RESKEY_state="${HA_VARRUN}/vm-client-${OCF_RESOURCE_INSTANCE}.state"
+	fi
+fi
+
+logging_options='-q'
+if ocf_is_true ${OCF_RESKEY_debug} ; then
+    logging_options=''
+fi
+
+CONNECT_CMD="vm-connect"
+ATTRD_UPDATER="attrd_updater"
+
+case $__OCF_ACTION in
+meta-data)	meta_data
+		exit $OCF_SUCCESS
+		;;
+start)		vmclient_start;;
+stop)		vmclient_stop;;
+monitor)	vmclient_monitor;;
+reload)		vmclient_start;;
+validate-all)	vmclient_validate;;
+usage|help)	vmclient_usage
+		exit $OCF_SUCCESS
+		;;
+*)		vmclient_usage
+		exit $OCF_ERR_UNIMPLEMENTED
+		;;
+esac
+exit $?
+

@@ -1,0 +1,11 @@
+# vm-connectd
+#
+# Starts vm-connectd included in pm_kvm_tools package,
+# it's for GUEST environment.
+
+start on runlevel [2345]
+
+env HA_logfacility=local1
+
+respawn
+exec /usr/sbin/vm-connectd -t guest

@@ -1,0 +1,160 @@
+#!/bin/sh
+#
+# External STONITH module for vm-stonith.
+#
+# Copyright (c) 2010 NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of version 2 of the GNU General Public License as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it would be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Further, this software is distributed without any warranty that it is
+# free of the rightful claim of any third person regarding infringement
+# or the like.  Any license provided herein, whether implied or
+# otherwise, applies only to this software file.  Patent licenses, if
+# any, provided herein do not apply to combinations of this program with
+# other software, or any other product whatsoever.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write the Free Software Foundation,
+# Inc., 59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+#
+CONNCMD="/usr/sbin/vm-connect -t stonith -i `uuidgen`"
+OPTIMEOUT="timeout"
+
+check_delimeter() {
+	delimeter_default=':'
+	: ${delimeter=$delimeter_default}
+	if [ "$delimeter" = " " ]; then
+		ha_log.sh err "Invalid delimeter [$delimeter]."
+		exit 6	#ERR_CONFIGURED
+	fi
+}
+
+trap_handler() {
+	ha_log.sh info "Request: target=$host, op=$OPTIMEOUT"
+	ha_log.sh debug "$CONNCMD -R \"$OPTIMEOUT\""
+	$CONNCMD -R "$OPTIMEOUT"
+	exit 1
+}
+trap trap_handler TERM
+
+ha_log.sh debug "\$*: [$*]"
+case $1 in
+gethosts)
+	check_delimeter
+	for h in $hostlist; do
+		echo $h | awk -F $delimeter '{print $1}'
+	done
+	exit 0
+	;;
+on|off|reset|status)
+	if [ "x$hostlist" = "x" ]; then
+		ha_log.sh err "hostlist isn't set."
+		exit 6	#ERR_CONFIGURED
+	fi
+	check_delimeter
+
+	target=""
+	if [ "x$2" != "x" ]; then
+		target=`echo $2 | tr A-Z a-z`
+	fi
+
+	for h in $hostlist; do
+		host=`echo $h | awk -F $delimeter '{print $1}' | tr A-Z a-z`
+		rsc=`echo $h | awk -F $delimeter '{print $2}'`
+
+		if [ "$1" != "status" -a "$target" != "$host" ]; then
+			continue
+		fi
+
+		while true; do
+			ha_log.sh info "Request: target=$host, op=$1"
+			ha_log.sh debug "$CONNCMD -r \"$1 $rsc\""
+			res=`$CONNCMD -r "$1 $rsc" 2>/dev/null`
+			rc=$?
+			ha_log.sh debug "rc [$rc]"
+			if [ $rc -eq 2 ]; then
+				ha_log.sh notice "request failed."
+				sleep 1
+				continue
+			elif [ $rc -ne 0 ]; then
+				ha_log.sh err "request failed."
+				exit 1
+			fi
+
+			ha_log.sh info "Result: $res"
+			if [ "$res" = "OK" ]; then
+				if [ "$1" = "status" ]; then
+					break
+				else
+					exit 0
+				fi
+			else
+				exit 1
+			fi
+		done
+	done
+	if [ "$1" = "status" ]; then
+		exit 0
+	else
+		exit 1
+	fi
+	;;
+getconfignames)
+	echo "hostlist delimeter"
+	exit 0
+	;;
+getinfo-devid)
+	echo "vm-stonith STONITH device"
+	exit 0
+	;;
+getinfo-devname)
+	echo "vm-stonith STONITH external device"
+	exit 0
+	;;
+getinfo-devdescr)
+	echo "Allows STONITH to control guests managed by a CRM/Pacemaker host."
+	echo "Requires VM + CRM/Pacemaker at both layers."
+	exit 0
+	;;
+getinfo-devurl)
+	echo "Virtio-Serial -> http://fedoraproject.org/wiki/Features/VirtioSerial"
+	exit 0
+	;;
+getinfo-xml)
+	cat <<VMSTONITHXML
+<parameters>
+<parameter name="hostlist" unique="1" required="1">
+<content type="string" />
+<shortdesc lang="en">
+Host Map
+</shortdesc>
+<longdesc lang="en">
+A mapping of hostname and resource ID supported by this device.
+For example: "guest-a1:encrypted-rscid guest-a2:encrypted-rscid"
+ * encrypted-rscid : encrypted resource ID of the virtual machine managed by the cluster of host.
+</longdesc>
+</parameter>
+<parameter name="delimeter" unique="0" required="0">
+<content type="string" />
+<shortdesc lang="en">
+Delimeter of hostname and resource ID
+</shortdesc>
+<longdesc lang="en">
+The delimiter of the hostname and resource ID in hostlist parameter.
+(The space character cannot be specified.)
+</longdesc>
+</parameter>
+</parameters>
+VMSTONITHXML
+	exit 0
+	;;
+*)
+	exit 1
+	;;
+esac
