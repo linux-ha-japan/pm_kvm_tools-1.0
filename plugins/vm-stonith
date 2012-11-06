@@ -129,7 +129,7 @@ getinfo-devurl)
 getinfo-xml)
 	cat <<VMSTONITHXML
 <parameters>
-<parameter name="hostlist" unique="1" required="1">
+<parameter name="hostlist" unique="0" required="1">
 <content type="string" />
 <shortdesc lang="en">
 Host Map
