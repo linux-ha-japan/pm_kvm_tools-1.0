@@ -15,7 +15,7 @@ Version: %{version}
 Release: %{release}
 Group: Applications
 Source: %{ORGARCH}.tar.gz
-License: GPL/LGPL
+License: GPL
 Vendor: NIPPON TELEGRAPH AND TELEPHONE CORPORATION
 BuildRoot: %{_tmppath}/%{name}-%{version}
 BuildRequires:  autoconf, automake libtool pacemaker-libs-devel
