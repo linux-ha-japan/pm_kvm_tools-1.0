@@ -316,6 +316,52 @@ optimize_path(const char *path)
 	return return_path;
 }
 
+#define READ_MAX 2000
+static xmlNode *
+filename2xml_no_strip(const char *filename)
+{
+	xmlNode *xml = NULL;
+	int fd = 0;
+	char buffer[READ_MAX];
+	char *output = NULL;
+	int len = 0;
+	int more = 0;
+
+	if(filename == NULL) {
+		return NULL;
+	}
+
+	fd = open(filename, 'r');
+	if(fd < 0) {
+		close(fd);
+		cl_perror("open(2) call failed");
+		return NULL;
+	}
+
+	do {
+		errno = 0;
+		memset(&buffer, 0, READ_MAX);
+		more = read(fd, buffer, READ_MAX - 1);
+		if(more > 0) {
+			buffer[more] = 0; /* Make sure its nul-terminated for logging
+					   * 'more' is always less than our buffer size
+					   */
+			crm_debug_3("Got %d more bytes: %.200s...", more, buffer);
+			output = realloc(output, len + more + 1);
+			snprintf(output + len, more + 1, "%s", buffer);
+			len += more;
+		}
+
+	} while(more == (READ_MAX - 1) || (more < 0 && errno == EINTR));
+
+	close(fd);
+	xml = string2xml(output);
+	if(output) {
+		free(output);
+	}
+	return xml;
+}
+
 static void
 parse_libvirt_conf(gpointer key, gpointer value, gpointer user_data)
 {
@@ -329,7 +375,7 @@ parse_libvirt_conf(gpointer key, gpointer value, gpointer user_data)
 	xmlNode *source_node = NULL;
 
 	crm_debug_3("parse to guest config [%s].", guest->conf_path);
-	conf_root = filename2xml(guest->conf_path);
+	conf_root = filename2xml_no_strip(guest->conf_path);
 	if(conf_root == NULL) {
 		crm_err("failed to convert a file into XML [%s].", guest->conf_path);
 		return;
