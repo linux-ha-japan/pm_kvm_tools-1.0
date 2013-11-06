@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.53])
-AC_INIT([pm_kvm_tools], [1.0], [BUG-REPORT-ADDRESS])
+AC_INIT([pm_kvm_tools], [1.2], [BUG-REPORT-ADDRESS])
 AM_INIT_AUTOMAKE
 AC_CONFIG_SRCDIR([lib/vm_connect.c])
 AC_CONFIG_HEADERS([include/config.h])
